@@ -20,25 +20,26 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        mingw = pkgs.pkgsCross.mingwW64;
 
         applications = with pkgs; [
           toolchain
         ];
 
         libraries = with pkgs; [
-          openssl
           pkg-config
-          gcc
+          mingw.stdenv.cc
+          mingw.windows.pthreads
         ];
       in
       {
         devShells.default = pkgs.mkShell {
           buildInputs = applications ++ libraries;
 
-          OPENSSL_DIR = pkgs.openssl.dev;
-          OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libraries;
           PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" libraries;
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${mingw.stdenv.cc}/bin/x86_64-w64-mingw32-gcc";
+          PKG_CONFIG_ALLOW_CROSS = "1";
         };
       }
     );

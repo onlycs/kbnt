@@ -1,0 +1,76 @@
+use futures_util::StreamExt;
+use serde::Deserialize;
+use snafu::prelude::*;
+use wmi::WMIConnection;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub(crate) struct Win32Process {
+    name: String,
+}
+
+#[derive(Debug, Snafu)]
+pub(crate) enum WmiError {
+    #[snafu(display("At {location}: Failed to create WMI connection\n{source}"))]
+    WmiConnection {
+        source: wmi::WMIError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Failed to query WMI\n{source}"))]
+    WmiQuery {
+        source: wmi::WMIError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Events stopped unexpectedly"))]
+    WmiEventStream {
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+}
+
+async fn query_ds() -> Result<bool, WmiError> {
+    let wmi = WMIConnection::new().context(WmiConnectionSnafu)?;
+
+    let results: Vec<Win32Process> = wmi
+        .async_raw_query("SELECT Name, ProcessId, ExecutablePath FROM Win32_Process")
+        .await
+        .context(WmiQuerySnafu)?;
+
+    for process in results {
+        if process.name.to_lowercase() == "driverstation.exe" {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+pub(crate) async fn wait_for_ds() -> Result<(), WmiError> {
+    if query_ds().await? {
+        return Ok(());
+    }
+
+    let wmi = WMIConnection::new().context(WmiConnectionSnafu)?;
+    let mut events = wmi
+        .exec_notification_query_async("SELECT * FROM Win32_ProcessStartTrace")
+        .context(WmiConnectionSnafu)?;
+
+    loop {
+        let event = match events.next().await {
+            Some(evt) => evt.context(WmiQuerySnafu)?,
+            None => return Err(WmiEventStreamSnafu.build()),
+        };
+
+        let process: Win32Process = event.into_desr().context(WmiQuerySnafu)?;
+
+        if process.name.to_lowercase() == "driverstation.exe" {
+            break;
+        }
+    }
+
+    Ok(())
+}
