@@ -1,6 +1,10 @@
 mod notify;
+mod nt;
 mod wmi;
 
+use std::time::Duration;
+
+use cuid2::cuid;
 use snafu::prelude::*;
 
 const APP_ID: &str = "KBNT";
@@ -28,10 +32,13 @@ async fn kbnt() -> Result<(), AppError> {
     loop {
         wmi::wait_for_ds().await.context(WmiSnafu)?;
         notify::driverstation().context(NotifySnafu)?;
+
+        let nt4 = nt::connect().await;
+        notify::connected().context(NotifySnafu)?;
     }
 }
 
-#[compio::main]
+#[tokio::main]
 async fn main() {
     // TODO: error handing
     kbnt().await.unwrap();

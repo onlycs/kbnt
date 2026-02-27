@@ -23,6 +23,9 @@
         mingw = pkgs.pkgsCross.mingwW64;
 
         applications = with pkgs; [
+          nil
+          nixd
+
           toolchain
         ];
 
