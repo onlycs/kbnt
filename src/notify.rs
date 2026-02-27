@@ -31,7 +31,8 @@ const CONNECTED_TITLE: &str = "KBNT: Robot Connected";
 const CONNECTED_MSG: &str = "KBNT has connected to the robot. Paddles are now functional!";
 
 const DISCONNECTED_TITLE: &str = "KBNT: Robot Disconnected";
-const DISCONNECTED_MSG: &str = "Robot has disconnected. Paddles are now non-functional!";
+const DISCONNECTED_MSG: &str = "Robot has disconnected. Attempting reconnection...";
+const DISCONNECTED_DS_MSG: &str = "Robot has disconnected. Waiting for DriverStation process...";
 
 pub(crate) fn active() -> Result<(), NotifyError> {
     toast(ACTIVE_TITLE, ACTIVE_MSG)
@@ -47,4 +48,8 @@ pub(crate) fn connected() -> Result<(), NotifyError> {
 
 pub(crate) fn disconnected() -> Result<(), NotifyError> {
     toast(DISCONNECTED_TITLE, DISCONNECTED_MSG)
+}
+
+pub(crate) fn disconnected_ds() -> Result<(), NotifyError> {
+    toast(DISCONNECTED_TITLE, DISCONNECTED_DS_MSG)
 }

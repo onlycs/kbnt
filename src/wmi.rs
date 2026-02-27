@@ -32,7 +32,7 @@ pub(crate) enum WmiError {
     },
 }
 
-async fn query_ds() -> Result<bool, WmiError> {
+pub(crate) async fn query_ds() -> Result<bool, WmiError> {
     let wmi = WMIConnection::new().context(WmiConnectionSnafu)?;
 
     let results: Vec<Win32Process> = wmi
