@@ -1,6 +1,9 @@
 #![feature(if_let_guard)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config;
 mod kb;
+mod log;
 mod notify;
 mod nt;
 mod wmi;
@@ -44,18 +47,24 @@ pub(crate) enum AppError {
         #[snafu(implicit)]
         location: snafu::Location,
     },
+
+    #[snafu(display("At {location}: Failed to parse config\n{source}"))]
+    ConfigParse {
+        source: config::ConfigError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
 }
 
-const ACTIVATE_ON: &str = "team2791";
-
 async fn kbnt() -> Result<(), AppError> {
-    notify::active().context(NotifySnafu)?;
+    let cfg = config::parse().await.context(ConfigParseSnafu)?;
 
+    notify::active().context(NotifySnafu)?;
     wmi::wait_for_ds().await.context(WmiSnafu)?;
     notify::driverstation().context(NotifySnafu)?;
 
     loop {
-        let nt4 = nt::NT4Connection::new(ACTIVATE_ON.to_string())
+        let nt4 = nt::NT4Connection::new(&cfg)
             .await
             .context(NetworkTablesSnafu)?;
 
@@ -91,6 +100,8 @@ async fn kbnt() -> Result<(), AppError> {
 
 #[tokio::main]
 async fn main() {
-    // TODO: error handing
-    kbnt().await.unwrap();
+    if let Err(e) = kbnt().await {
+        let filename = log::error(e);
+        notify::error(filename.display()).ok();
+    }
 }

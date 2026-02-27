@@ -9,7 +9,7 @@ use rmpv::Utf8String;
 use snafu::{ResultExt, Snafu};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-const TEAM_NUMBER: u16 = 2791;
+use crate::config::KBNTConfig;
 
 #[derive(Debug, Snafu)]
 pub(crate) enum NTError {
@@ -54,10 +54,10 @@ pub(crate) struct NT4Connection {
 }
 
 impl NT4Connection {
-    async fn connect() -> Result<Client, NTError> {
+    async fn connect(team: u16) -> Result<Client, NTError> {
         let client = Client::try_new_w_config(
             SocketAddrV4::new(
-                Ipv4Addr::new(10, (TEAM_NUMBER / 100) as u8, (TEAM_NUMBER % 100) as u8, 2),
+                Ipv4Addr::new(10, (team / 100) as u8, (team % 100) as u8, 2),
                 5810,
             ),
             Default::default(),
@@ -68,7 +68,7 @@ impl NT4Connection {
             Ok(client) => client,
             Err(network_tables::Error::ConnectTimeout(_)) => {
                 tokio::time::sleep(Duration::from_secs(5)).await;
-                Box::pin(Self::connect()).await?
+                Box::pin(Self::connect(team)).await?
             }
             other @ Err(_) => {
                 other.context(ConnectSnafu)?;
@@ -79,8 +79,9 @@ impl NT4Connection {
         Ok(client)
     }
 
-    pub(crate) async fn new(keys: String) -> Result<NT4Connection, NTError> {
-        let client = Self::connect().await?;
+    pub(crate) async fn new(config: &KBNTConfig) -> Result<NT4Connection, NTError> {
+        let keys = config.capture_chars.to_lowercase();
+        let client = Self::connect(config.team_number).await?;
 
         let k2p = client
             .publish_topic(
@@ -118,7 +119,7 @@ impl NT4Connection {
     }
 
     pub(crate) async fn keydown(&mut self, key: char) -> Result<(), NTError> {
-        let Some(i) = self.keys.find(key.to_string().as_str()) else {
+        let Some(i) = self.keys.find(key.to_string().to_lowercase().as_str()) else {
             return Ok(());
         };
 

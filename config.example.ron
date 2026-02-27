@@ -1,0 +1,11 @@
+KBNTConfig (
+    // The team number of the robot.
+    team_number: 2791,
+
+    // Every key in this string will be sent to the robot.
+    // In this case, the 'T', 'E, 'A', ...etc keys will be listened for.
+    //
+    // This string is NOT case-sensitive, and does NOT respect control characters (e.g. backspace, enter)
+    // or modifiers (e.g. shift, ctrl, alt)
+    capture_chars: "team2791",
+)
