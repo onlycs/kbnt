@@ -1,4 +1,4 @@
-#![feature(if_let_guard, once_cell_try)]
+#![feature(if_let_guard)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod install;

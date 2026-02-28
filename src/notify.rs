@@ -24,7 +24,7 @@ fn toast(title: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), NotifyE
         chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
     ));
 
-    Toast::new(Toast::POWERSHELL_APP_ID)
+    Toast::new(crate::install::APP_ID)
         .title(&title)
         .text1(&content)
         .show()

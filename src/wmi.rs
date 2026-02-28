@@ -38,7 +38,7 @@ pub(crate) fn connection() -> Result<WMIConnection, WmiError> {
 
 pub(crate) async fn query_ds(wmi: &WMIConnection) -> Result<bool, WmiError> {
     let results: Vec<Win32Process> = wmi
-        .async_raw_query("SELECT Name, ProcessId, ExecutablePath FROM Win32_Process")
+        .async_raw_query("SELECT Name FROM Win32_Process")
         .await
         .context(WmiQuerySnafu)?;
 

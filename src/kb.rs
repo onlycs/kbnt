@@ -1,9 +1,8 @@
+use std::{ptr, sync::Mutex};
+
 use snafu::prelude::*;
-use std::ptr;
-use std::sync::Mutex;
 use tokio::sync::mpsc;
-use windows::Win32::Foundation::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::{Foundation::*, UI::WindowsAndMessaging::*};
 
 static mut HOOK: HHOOK = HHOOK(ptr::null_mut());
 static SENDER: Mutex<Option<mpsc::UnboundedSender<char>>> = Mutex::new(None);

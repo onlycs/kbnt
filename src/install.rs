@@ -3,6 +3,10 @@ use std::{fs, io, path::PathBuf};
 use directories::ProjectDirs;
 use serde::Deserialize;
 use snafu::prelude::*;
+use winreg::enums::HKEY_CURRENT_USER;
+
+pub(crate) const APP_ID: &str = "org.team2791.kbnt";
+pub(crate) const DISPLAY_NAME: &str = "KBNT";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct KBNTConfig {
@@ -51,6 +55,13 @@ pub(crate) enum InstallError {
 
     #[snafu(display("At {location}: Failed to find current executable\n{source}"))]
     CurrentExe {
+        source: io::Error,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Registry error\n{source}"))]
+    Registry {
         source: io::Error,
         #[snafu(implicit)]
         location: snafu::Location,
@@ -134,9 +145,32 @@ fn add_startup() -> Result<(), InstallError> {
     Ok(())
 }
 
+fn register_appid() -> Result<(), InstallError> {
+    let install_dir = dir()?;
+    let exe_path = install_dir.join("kbnt.exe");
+
+    let hkcu = winreg::RegKey::predef(HKEY_CURRENT_USER);
+    let appid_key = &format!("Software\\Classes\\AppUserModelId\\{APP_ID}");
+
+    if hkcu.open_subkey(appid_key).is_ok() {
+        return Ok(());
+    }
+
+    let (key, _) = hkcu.create_subkey(appid_key).context(RegistrySnafu)?;
+
+    key.set_value("DisplayName", &DISPLAY_NAME)
+        .context(RegistrySnafu)?;
+
+    key.set_value("IconUri", &exe_path.to_string_lossy().to_string())
+        .context(RegistrySnafu)?;
+
+    Ok(())
+}
+
 pub(crate) fn install() -> Result<(), InstallError> {
     move_exe()?;
     add_startup()?;
+    register_appid()?;
 
     Ok(())
 }
