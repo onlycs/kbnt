@@ -1,4 +1,4 @@
-#![feature(if_let_guard)]
+#![feature(if_let_guard, exit_status_error)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod install;

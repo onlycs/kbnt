@@ -1,4 +1,4 @@
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf, process::ExitStatusError};
 
 use directories::ProjectDirs;
 use serde::Deserialize;
@@ -64,6 +64,20 @@ pub(crate) enum InstallError {
     #[snafu(display("At {location}: MS Link error\n{source}"))]
     MsLink {
         source: mslnk::MSLinkError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Failed to kill old KBNT\n{source}"))]
+    ExecKillOld {
+        source: io::Error,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Failed to kill old KBNT\n{source}"))]
+    KillOld {
+        source: ExitStatusError,
         #[snafu(implicit)]
         location: snafu::Location,
     },
@@ -136,16 +150,24 @@ pub(crate) fn config() -> Result<KBNTConfigHandle, InstallError> {
 
 fn move_exe() -> Result<(), InstallError> {
     let install_dir = dir()?;
+    let target_path = install_dir.join("kbnt.exe");
+    let current_exe = std::env::current_exe().context(CurrentExeSnafu)?;
 
-    if install_dir.join("kbnt.exe").exists() {
-        return Ok(());
+    if target_path.exists() {
+        if current_exe == target_path {
+            return Ok(());
+        }
+
+        // kill existing instance
+        std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "kbnt.exe"])
+            .status()
+            .context(ExecKillOldSnafu)?
+            .exit_ok()
+            .context(KillOldSnafu)?;
     }
 
-    let current_exe = std::env::current_exe().context(CurrentExeSnafu)?;
-    let target_path = install_dir.join("kbnt.exe");
-
     fs::copy(&current_exe, &target_path).context(FileCreateSnafu { path: &target_path })?;
-
     Ok(())
 }
 
