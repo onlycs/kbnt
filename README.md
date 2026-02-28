@@ -21,9 +21,13 @@ while the robot is connected and the driver station is open.
     - robot disconnection, followed by status (i.e. waiting for DS or robot)
 4. The app will forever run in the background of your machine. On first run, it will set itself up to start on login. See `src/install.rs` for how this works.
 
+## Disclaimer
+
+This entire project is yet-to-be-tested (ATTOW, I finished this yesterday). Most notably, I need a Windows computer, which I do not have access to for the next few days.
+
 ## Robot Code
 
-Coming as soon as I get this tested on a windows computer. (Hint: I use nix, btw).
+See the `java/` folder for the utility (`KBNT.java`) and an implementation example (`XboxEliteController.java`). You should be able to copy the files into `src/main/java/frc/robot/controller`. Other directories will work fine, just remember to change the `package` header :)
 
 ## Why our team is using this
 
