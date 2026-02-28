@@ -24,7 +24,6 @@ pub(crate) enum KBError {
     },
 }
 
-#[allow(static_mut_refs)]
 unsafe extern "system" fn keyboard_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if ncode >= 0 {
         let kb = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
@@ -37,9 +36,7 @@ unsafe extern "system" fn keyboard_proc(ncode: i32, wparam: WPARAM, lparam: LPAR
             };
             if let Some(ch) = ch {
                 if let Some(tx) = &*SENDER.lock().unwrap_or_else(|p| p.into_inner()) {
-                    if tx.send(ch).is_err() {
-                        unsafe { PostQuitMessage(0) }
-                    }
+                    let _ = tx.send(ch);
                 }
             }
         }
@@ -49,32 +46,35 @@ unsafe extern "system" fn keyboard_proc(ncode: i32, wparam: WPARAM, lparam: LPAR
 }
 
 pub fn listen_keys() -> Result<mpsc::UnboundedReceiver<char>, KBError> {
+    let s = SENDER.lock().unwrap_or_else(|p| p.into_inner());
+
     snafu::ensure!(
-        SENDER
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-            .is_none_or(|s| s.is_closed()),
+        s.as_ref().is_none_or(|s| s.is_closed()),
         AlreadyListeningSnafu
     );
+
+    let uninit = s.as_ref().is_none();
+    drop(s);
 
     let (tx, rx) = mpsc::unbounded_channel();
     *SENDER.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
 
-    unsafe {
-        HOOK = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
-            .context(HookSetSnafu)?;
-    }
-
-    std::thread::spawn(|| unsafe {
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+    if uninit {
+        unsafe {
+            HOOK = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
+                .context(HookSetSnafu)?;
         }
 
-        UnhookWindowsHookEx(HOOK).unwrap();
-    });
+        std::thread::spawn(|| unsafe {
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            UnhookWindowsHookEx(HOOK).unwrap();
+        });
+    }
 
     Ok(rx)
 }

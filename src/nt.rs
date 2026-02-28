@@ -1,15 +1,13 @@
-use std::{
-    net::{Ipv4Addr, SocketAddrV4},
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 
 use itertools::Itertools;
 use network_tables::v4::{Client, PublishProperties, PublishedTopic, Type};
 use rmpv::Utf8String;
 use snafu::{ResultExt, Snafu};
 use tokio::sync::mpsc::UnboundedReceiver;
+use wmi::WMIConnection;
 
-use crate::config::KBNTConfig;
+use crate::install::KBNTConfig;
 
 #[derive(Debug, Snafu)]
 pub(crate) enum NTError {
@@ -33,14 +31,40 @@ pub(crate) enum NTError {
         #[snafu(implicit)]
         location: snafu::Location,
     },
+
+    #[snafu(display("At {location}: WMI error\n{source}"))]
+    Wmi {
+        source: crate::wmi::WmiError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: DriverStation closed while waiting for connection"))]
+    DsClosed {
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display(
+        "At {location}: Failed parsing NT4 IP address\n{source}\nFailed parsing {ip_str}:5810"
+    ))]
+    IpParse {
+        source: std::net::AddrParseError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+        ip_str: String,
+    },
 }
 
 impl NTError {
-    pub(crate) fn source(&self) -> &network_tables::Error {
+    pub(crate) fn nt_source(&self) -> Option<&network_tables::Error> {
         match self {
-            NTError::Connect { source, .. } => source,
-            NTError::TopicPublish { source, .. } => source,
-            NTError::ValuePublish { source, .. } => source,
+            NTError::Connect { source, .. } => Some(source),
+            NTError::TopicPublish { source, .. } => Some(source),
+            NTError::ValuePublish { source, .. } => Some(source),
+            NTError::Wmi { .. } => None,
+            NTError::DsClosed { .. } => None,
+            NTError::IpParse { .. } => None,
         }
     }
 }
@@ -54,34 +78,34 @@ pub(crate) struct NT4Connection {
 }
 
 impl NT4Connection {
-    async fn connect(team: u16) -> Result<Client, NTError> {
-        let client = Client::try_new_w_config(
-            SocketAddrV4::new(
-                Ipv4Addr::new(10, (team / 100) as u8, (team % 100) as u8, 2),
-                5810,
-            ),
-            Default::default(),
-        )
-        .await;
+    async fn connect(ipv4: &String, wmi: &WMIConnection) -> Result<Client, NTError> {
+        let addr = format!("{ipv4}:5810")
+            .parse::<SocketAddr>()
+            .context(IpParseSnafu { ip_str: ipv4 })?;
 
-        let client = match client {
-            Ok(client) => client,
-            Err(network_tables::Error::ConnectTimeout(_)) => {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                Box::pin(Self::connect(team)).await?
+        let mut client = Client::try_new_w_config(addr, Default::default()).await;
+
+        while let Err(network_tables::Error::ConnectTimeout(_)) = client {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            if !crate::wmi::query_ds(wmi).await.context(WmiSnafu)? {
+                return Err(DsClosedSnafu.build());
             }
-            other @ Err(_) => {
-                other.context(ConnectSnafu)?;
-                unreachable!()
-            }
-        };
+
+            client = Client::try_new_w_config(addr, Default::default()).await;
+        }
+
+        let client = client.context(ConnectSnafu)?;
 
         Ok(client)
     }
 
-    pub(crate) async fn new(config: &KBNTConfig) -> Result<NT4Connection, NTError> {
+    pub(crate) async fn new(
+        config: &KBNTConfig,
+        wmi: &WMIConnection,
+    ) -> Result<NT4Connection, NTError> {
         let keys = config.capture_chars.to_lowercase();
-        let client = Self::connect(config.team_number).await?;
+        let client = Self::connect(&config.robot_ip, wmi).await?;
 
         let k2p = client
             .publish_topic(

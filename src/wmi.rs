@@ -32,9 +32,11 @@ pub(crate) enum WmiError {
     },
 }
 
-pub(crate) async fn query_ds() -> Result<bool, WmiError> {
-    let wmi = WMIConnection::new().context(WmiConnectionSnafu)?;
+pub(crate) fn connection() -> Result<WMIConnection, WmiError> {
+    WMIConnection::new().context(WmiConnectionSnafu)
+}
 
+pub(crate) async fn query_ds(wmi: &WMIConnection) -> Result<bool, WmiError> {
     let results: Vec<Win32Process> = wmi
         .async_raw_query("SELECT Name, ProcessId, ExecutablePath FROM Win32_Process")
         .await
@@ -49,15 +51,14 @@ pub(crate) async fn query_ds() -> Result<bool, WmiError> {
     Ok(false)
 }
 
-pub(crate) async fn wait_for_ds() -> Result<(), WmiError> {
-    if query_ds().await? {
-        return Ok(());
-    }
-
-    let wmi = WMIConnection::new().context(WmiConnectionSnafu)?;
+pub(crate) async fn wait_for_ds(wmi: &WMIConnection) -> Result<(), WmiError> {
     let mut events = wmi
         .exec_notification_query_async("SELECT * FROM Win32_ProcessStartTrace")
         .context(WmiConnectionSnafu)?;
+
+    if query_ds(&wmi).await? {
+        return Ok(());
+    }
 
     loop {
         let event = match events.next().await {

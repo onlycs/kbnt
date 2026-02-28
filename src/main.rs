@@ -1,7 +1,7 @@
-#![feature(if_let_guard)]
+#![feature(if_let_guard, once_cell_try)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod config;
+mod install;
 mod kb;
 mod log;
 mod notify;
@@ -9,8 +9,7 @@ mod nt;
 mod wmi;
 
 use snafu::prelude::*;
-
-use crate::nt::keypress_loop;
+use tokio_tungstenite::tungstenite;
 
 #[derive(Debug, Snafu)]
 pub(crate) enum AppError {
@@ -48,51 +47,67 @@ pub(crate) enum AppError {
         location: snafu::Location,
     },
 
-    #[snafu(display("At {location}: Failed to parse config\n{source}"))]
-    ConfigParse {
-        source: config::ConfigError,
+    #[snafu(display("At {location}: Failed to get config\n{source}"))]
+    Config {
+        source: install::InstallError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Failed to install KBNT\n{source}"))]
+    Install {
+        source: install::InstallError,
         #[snafu(implicit)]
         location: snafu::Location,
     },
 }
 
 async fn kbnt() -> Result<(), AppError> {
-    let cfg = config::parse().await.context(ConfigParseSnafu)?;
+    install::install().context(InstallSnafu)?;
+
+    let wmi = wmi::connection().context(WmiSnafu)?;
+    let cfg = install::config().context(ConfigSnafu)?;
 
     notify::active().context(NotifySnafu)?;
-    wmi::wait_for_ds().await.context(WmiSnafu)?;
+    wmi::wait_for_ds(&wmi).await.context(WmiSnafu)?;
     notify::driverstation().context(NotifySnafu)?;
 
     loop {
-        let nt4 = nt::NT4Connection::new(&cfg)
-            .await
-            .context(NetworkTablesSnafu)?;
+        let nt4 = match nt::NT4Connection::new(&cfg, &wmi).await {
+            Ok(nt4) => nt4,
+            Err(nt::NTError::DsClosed { .. }) => {
+                notify::disconnected_ds().context(NotifySnafu)?;
+                wmi::wait_for_ds(&wmi).await.context(WmiSnafu)?;
+                notify::driverstation().context(NotifySnafu)?;
+                continue;
+            }
+            Err(e) => return Err(e).context(NetworkTablesSnafu),
+        };
 
         notify::connected().context(NotifySnafu)?;
 
         let rx = kb::listen_keys().context(KeyboardHookSnafu)?;
 
-        match keypress_loop(nt4, rx).await {
+        match nt::keypress_loop(nt4, rx).await {
             Ok(()) => {
                 return Err(KeyboardHookStoppedSnafu.build());
             }
-            Err(e)
-                if let network_tables::Error::Tungstenite(
-                    tokio_tungstenite::tungstenite::Error::ConnectionClosed,
-                ) = e.source() =>
-            {
-                if wmi::query_ds().await.context(WmiSnafu)? {
+            Err(e) => {
+                let Some(network_tables::Error::Tungstenite(tungstenite::Error::ConnectionClosed)) =
+                    e.nt_source()
+                else {
+                    return Err(e).context(NetworkTablesSnafu);
+                };
+
+                if wmi::query_ds(&wmi).await.context(WmiSnafu)? {
                     // attempt reconnection immediately if DS is still open
                     notify::disconnected().context(NotifySnafu)?;
                     continue;
                 }
 
                 notify::disconnected_ds().context(NotifySnafu)?;
-                wmi::wait_for_ds().await.context(WmiSnafu)?;
+                wmi::wait_for_ds(&wmi).await.context(WmiSnafu)?;
                 notify::driverstation().context(NotifySnafu)?;
-            }
-            Err(e) => {
-                return Err(e).context(NetworkTablesSnafu);
             }
         }
     }
