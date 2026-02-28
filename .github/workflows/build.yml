@@ -3,11 +3,23 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "**.rs"
+      - "**.toml"
+      - "**.ron"
+      - "**.yml"
+      - ".cargo/**"
     tags:
       - "v*"
   pull_request:
     branches:
       - main
+    paths:
+      - "**.rs"
+      - "**.toml"
+      - "**.ron"
+      - "**.yml"
+      - ".cargo/**"
 
 jobs:
   build:

@@ -7,7 +7,7 @@ use snafu::{ResultExt, Snafu};
 use tokio::sync::mpsc::UnboundedReceiver;
 use wmi::WMIConnection;
 
-use crate::install::KBNTConfig;
+use crate::install::KBNTConfigHandle;
 
 #[derive(Debug, Snafu)]
 pub(crate) enum NTError {
@@ -54,6 +54,13 @@ pub(crate) enum NTError {
         location: snafu::Location,
         ip_str: String,
     },
+
+    #[snafu(display("At {location}: Failed to read config\n{source}"))]
+    Config {
+        source: crate::install::InstallError,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
 }
 
 impl NTError {
@@ -65,6 +72,7 @@ impl NTError {
             NTError::Wmi { .. } => None,
             NTError::DsClosed { .. } => None,
             NTError::IpParse { .. } => None,
+            NTError::Config { .. } => None,
         }
     }
 }
@@ -78,7 +86,8 @@ pub(crate) struct NT4Connection {
 }
 
 impl NT4Connection {
-    async fn connect(ipv4: &String, wmi: &WMIConnection) -> Result<Client, NTError> {
+    async fn connect(config: &KBNTConfigHandle, wmi: &WMIConnection) -> Result<Client, NTError> {
+        let ipv4 = config.robot_ip().context(ConfigSnafu)?;
         let addr = format!("{ipv4}:5810")
             .parse::<SocketAddr>()
             .context(IpParseSnafu { ip_str: ipv4 })?;
@@ -101,11 +110,11 @@ impl NT4Connection {
     }
 
     pub(crate) async fn new(
-        config: &KBNTConfig,
+        config: &KBNTConfigHandle,
         wmi: &WMIConnection,
     ) -> Result<NT4Connection, NTError> {
-        let keys = config.capture_chars.to_lowercase();
-        let client = Self::connect(&config.robot_ip, wmi).await?;
+        let client = Self::connect(&config, wmi).await?;
+        let keys = config.capture_chars().context(ConfigSnafu)?.to_lowercase();
 
         let k2p = client
             .publish_topic(

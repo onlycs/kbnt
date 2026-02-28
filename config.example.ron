@@ -1,8 +1,9 @@
 KBNTConfig (
-    // The team number of the robot.
-    team_number: 2791,
+    // The IP of the NetworkTables server. This is usually the IP of the robot,
+    // i.e. 10.TE.AM.2, where TEAM is the team number of the robot.
+    robot_ip: "10.27.91.2",
 
-    // Every key in this string will be sent to the robot.
+    // Every key in this string will be sent to the robot, all others will be ignored.
     // In this case, the 'T', 'E, 'A', ...etc keys will be listened for.
     //
     // This string is NOT case-sensitive, and does NOT respect control characters (e.g. backspace, enter)

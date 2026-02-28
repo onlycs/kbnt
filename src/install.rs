@@ -8,12 +8,6 @@ use winreg::enums::HKEY_CURRENT_USER;
 pub(crate) const APP_ID: &str = "org.team2791.kbnt";
 pub(crate) const DISPLAY_NAME: &str = "KBNT";
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct KBNTConfig {
-    pub(crate) robot_ip: String,
-    pub(crate) capture_chars: String,
-}
-
 #[derive(Debug, Snafu)]
 pub(crate) enum InstallError {
     #[snafu(display("At {location}: Failed to find config directory"))]
@@ -97,7 +91,37 @@ pub(crate) fn dir_infallible() -> PathBuf {
     }
 }
 
-pub(crate) fn config() -> Result<KBNTConfig, InstallError> {
+#[derive(Debug, Deserialize)]
+pub(crate) struct KBNTConfig {
+    pub(crate) robot_ip: String,
+    pub(crate) capture_chars: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct KBNTConfigHandle {
+    pub(crate) path: PathBuf,
+}
+
+impl KBNTConfigHandle {
+    fn read(&self) -> Result<KBNTConfig, InstallError> {
+        let config_str =
+            fs::read_to_string(&self.path).context(FileReadSnafu { path: &self.path })?;
+
+        let config = ron::from_str(&config_str).context(ParseSnafu)?;
+
+        Ok(config)
+    }
+
+    pub(crate) fn robot_ip(&self) -> Result<String, InstallError> {
+        Ok(self.read()?.robot_ip)
+    }
+
+    pub(crate) fn capture_chars(&self) -> Result<String, InstallError> {
+        Ok(self.read()?.capture_chars)
+    }
+}
+
+pub(crate) fn config() -> Result<KBNTConfigHandle, InstallError> {
     let install_dir = dir()?;
     let path = &install_dir.join("config.ron");
 
@@ -105,10 +129,9 @@ pub(crate) fn config() -> Result<KBNTConfig, InstallError> {
         fs::write(path, include_str!("../config.example.ron")).context(FileCreateSnafu { path })?;
     }
 
-    let config_str = fs::read_to_string(&path).context(FileReadSnafu { path })?;
-    let config = ron::from_str(&config_str).context(ParseSnafu)?;
-
-    Ok(config)
+    Ok(KBNTConfigHandle {
+        path: path.to_path_buf(),
+    })
 }
 
 fn move_exe() -> Result<(), InstallError> {
