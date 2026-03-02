@@ -21,6 +21,6 @@ tokio = { version = "1.49.0", features = ["fs", "macros", "rt", "rt-multi-thread
 tokio-tungstenite = "0.18.0"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
-windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = ["Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 winreg = "0.55.0"
 wmi = "0.18.3"

@@ -1,8 +1,22 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    env, fs, io,
+    os::windows::ffi::OsStrExt,
+    path::PathBuf,
+    process::{self, Command},
+};
 
 use directories::ProjectDirs;
 use serde::Deserialize;
 use snafu::prelude::*;
+use windows::{
+    Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+        UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOW},
+    },
+    core::{PCWSTR, w},
+};
 use winreg::enums::HKEY_CURRENT_USER;
 
 pub(crate) const APP_ID: &str = "org.team2791.kbnt";
@@ -61,16 +75,23 @@ pub(crate) enum InstallError {
         location: snafu::Location,
     },
 
-    #[snafu(display("At {location}: MS Link error\n{source}"))]
-    MsLink {
-        source: mslnk::MSLinkError,
+    #[snafu(display("At {location}: Failed to kill old KBNT\n{source}"))]
+    ExecKillOld {
+        source: io::Error,
         #[snafu(implicit)]
         location: snafu::Location,
     },
 
-    #[snafu(display("At {location}: Failed to kill old KBNT\n{source}"))]
-    ExecKillOld {
+    #[snafu(display("At {location}: Failed to schedule startup task\n{source}"))]
+    TaskSchedule {
         source: io::Error,
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
+
+    #[snafu(display("At {location}: Failed to elevate process\n{source}"))]
+    Elevate {
+        source: windows::core::Error,
         #[snafu(implicit)]
         location: snafu::Location,
     },
@@ -152,7 +173,7 @@ fn move_exe() -> Result<(), InstallError> {
         }
 
         // kill existing instance
-        std::process::Command::new("taskkill")
+        Command::new("taskkill")
             .args(["/F", "/IM", "kbnt.exe"])
             .status()
             .context(ExecKillOldSnafu)?;
@@ -163,20 +184,20 @@ fn move_exe() -> Result<(), InstallError> {
 }
 
 fn add_startup() -> Result<(), InstallError> {
-    let startup_dir = dirs::config_dir()
-        .map(|d| d.join("Microsoft\\Windows\\Start Menu\\Programs\\Startup"))
-        .ok_or_else(|| ConfigDirFindSnafu.build())?;
+    let exe = dir()?.join("kbnt.exe");
 
-    let target_path = startup_dir.join("kbnt.lnk");
-    if target_path.exists() {
-        return Ok(());
-    }
-
-    let install_exe = dir()?.join("kbnt.exe");
-    mslnk::ShellLink::new(&install_exe)
-        .context(MsLinkSnafu)?
-        .create_lnk(&target_path)
-        .context(MsLinkSnafu)?;
+    #[rustfmt::skip]
+    Command::new("schtasks")
+        .args([
+            "/Create",
+            "/TN", "kbnt",
+            "/TR", exe.to_string_lossy().as_str(),
+            "/SC", "ONLOGON",
+            "/RL", "HIGHEST",
+            "/F",
+        ])
+        .status()
+        .context(TaskScheduleSnafu)?;
 
     Ok(())
 }
@@ -197,7 +218,57 @@ fn register_appid() -> Result<(), InstallError> {
     Ok(())
 }
 
+pub(crate) fn elevate() -> Result<(), InstallError> {
+    // check current permissions
+    unsafe {
+        let mut token = HANDLE::default();
+
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).context(ElevateSnafu)?;
+
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut size = 0;
+
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        )
+        .context(ElevateSnafu)?;
+
+        CloseHandle(token).context(ElevateSnafu)?;
+
+        if elevation.TokenIsElevated != 0 {
+            return Ok(());
+        }
+    }
+
+    let current_exe = env::current_exe().context(CurrentExeSnafu)?;
+
+    unsafe {
+        ShellExecuteW(
+            None,
+            w!("runas"),
+            PCWSTR(
+                current_exe
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(Some(0))
+                    .collect::<Vec<u16>>()
+                    .as_ptr(),
+            ),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOW,
+        );
+    }
+
+    process::exit(0);
+}
+
 pub(crate) fn install() -> Result<(), InstallError> {
+    elevate()?;
     move_exe()?;
     add_startup()?;
     register_appid()?;

@@ -1,7 +1,7 @@
 use std::{ptr, sync::Mutex};
 
 use snafu::prelude::*;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use windows::Win32::{Foundation::*, UI::WindowsAndMessaging::*};
 
 static mut HOOK: HHOOK = HHOOK(ptr::null_mut());
@@ -44,8 +44,8 @@ unsafe extern "system" fn keyboard_proc(ncode: i32, wparam: WPARAM, lparam: LPAR
     unsafe { CallNextHookEx(Some(HOOK), ncode, wparam, lparam) }
 }
 
-pub fn listen_keys() -> Result<mpsc::UnboundedReceiver<char>, KBError> {
-    let s = SENDER.lock().unwrap_or_else(|p| p.into_inner());
+pub async fn listen_keys() -> Result<mpsc::UnboundedReceiver<char>, KBError> {
+    let mut s = SENDER.lock().unwrap_or_else(|p| p.into_inner());
 
     snafu::ensure!(
         s.as_ref().is_none_or(|s| s.is_closed()),
@@ -53,26 +53,36 @@ pub fn listen_keys() -> Result<mpsc::UnboundedReceiver<char>, KBError> {
     );
 
     let uninit = s.as_ref().is_none();
+    let (tx, rx) = mpsc::unbounded_channel();
+    *s = Some(tx);
     drop(s);
 
-    let (tx, rx) = mpsc::unbounded_channel();
-    *SENDER.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
-
     if uninit {
-        unsafe {
-            HOOK = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
-                .context(HookSetSnafu)?;
-        }
+        let (init_tx, init_rx) = oneshot::channel();
 
-        std::thread::spawn(|| unsafe {
+        std::thread::spawn(move || unsafe {
+            let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) {
+                Ok(h) => {
+                    HOOK = h;
+                    let _ = init_tx.send(Ok(()));
+                    h
+                }
+                Err(e) => {
+                    let _ = init_tx.send(Err(e));
+                    return;
+                }
+            };
+
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
 
-            UnhookWindowsHookEx(HOOK).unwrap();
+            UnhookWindowsHookEx(hook).unwrap();
         });
+
+        init_rx.await.unwrap().context(HookSetSnafu)?;
     }
 
     Ok(rx)

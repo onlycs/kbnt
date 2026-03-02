@@ -5,6 +5,7 @@ use network_tables::v4::{Client, Config, PublishProperties, PublishedTopic, Type
 use rmpv::Utf8String;
 use snafu::{ResultExt, Snafu};
 use tokio::sync::mpsc::UnboundedReceiver;
+use tracing::debug;
 use wmi::WMIConnection;
 
 use crate::install::KBNTConfigHandle;
@@ -80,42 +81,41 @@ impl NTError {
 #[derive(Debug)]
 pub(crate) struct NT4Connection {
     client: Client,
-    topic: PublishedTopic,
     keys: String,
+    #[allow(unused)]
+    keys_topic: PublishedTopic,
     presses: Vec<i32>,
+    topic: PublishedTopic,
 }
 
 impl NT4Connection {
     async fn connect(config: &KBNTConfigHandle, wmi: &WMIConnection) -> Result<Client, NTError> {
-        let ipv4 = config.robot_ip().context(ConfigSnafu)?;
-        let addr = format!("{ipv4}:5810")
-            .parse::<SocketAddr>()
-            .context(IpParseSnafu { ip_str: ipv4 })?;
+        let connect = || {
+            let ipv4 = config.robot_ip().context(ConfigSnafu)?;
+            let addr = format!("{ipv4}:5810")
+                .parse::<SocketAddr>()
+                .context(IpParseSnafu { ip_str: ipv4 })?;
 
-        let mut client = Client::try_new_w_config(
-            addr,
-            Config {
-                should_reconnect: Box::new(|_| false),
-                ..Default::default()
-            },
-        )
-        .await;
+            Ok(Client::try_new_w_config(
+                addr,
+                Config {
+                    should_reconnect: Box::new(|_| false),
+                    ..Default::default()
+                },
+            ))
+        };
+
+        let mut client = connect()?.await;
 
         while let Err(network_tables::Error::ConnectTimeout(_)) = client {
+            debug!("Timeout, reconnecting in 5 seconds...");
             tokio::time::sleep(Duration::from_secs(5)).await;
 
             if !crate::wmi::query_ds(wmi).await.context(WmiSnafu)? {
                 return Err(DsClosedSnafu.build());
             }
 
-            client = Client::try_new_w_config(
-                addr,
-                Config {
-                    should_reconnect: Box::new(|_| false),
-                    ..Default::default()
-                },
-            )
-            .await;
+            client = connect()?.await;
         }
 
         let client = client.context(ConnectSnafu)?;
@@ -160,6 +160,7 @@ impl NT4Connection {
         Ok(NT4Connection {
             client,
             presses: vec![0; keys.len()],
+            keys_topic: k2p,
             topic,
             keys,
         })

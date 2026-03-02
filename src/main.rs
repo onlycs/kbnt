@@ -1,4 +1,4 @@
-#![feature(if_let_guard)]
+#![feature(if_let_guard, str_as_str)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod install;
@@ -10,7 +10,7 @@ mod wmi;
 
 use snafu::prelude::*;
 use tokio_tungstenite::tungstenite;
-use tracing::Level;
+use tracing::{Level, info};
 use tracing_subscriber::{filter::Targets, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Snafu)]
@@ -69,6 +69,7 @@ async fn kbnt() -> Result<(), AppError> {
 
     let wmi = wmi::connection().context(WmiSnafu)?;
     let cfg = install::config().context(ConfigSnafu)?;
+    info!("Installation Complete. Application active.");
 
     notify::active().context(NotifySnafu)?;
     wmi::wait_for_ds(&wmi).await.context(WmiSnafu)?;
@@ -88,7 +89,7 @@ async fn kbnt() -> Result<(), AppError> {
 
         notify::connected().context(NotifySnafu)?;
 
-        let rx = kb::listen_keys().context(KeyboardHookSnafu)?;
+        let rx = kb::listen_keys().await.context(KeyboardHookSnafu)?;
 
         match nt::keypress_loop(nt4, rx).await {
             Ok(()) => {
