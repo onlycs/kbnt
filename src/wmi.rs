@@ -9,6 +9,12 @@ pub(crate) struct Win32Process {
     name: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub(crate) struct Win32ProcessTrace {
+    process_name: String,
+}
+
 #[derive(Debug, Snafu)]
 pub(crate) enum WmiError {
     #[snafu(display("At {location}: Failed to create WMI connection\n{source}"))]
@@ -66,9 +72,9 @@ pub(crate) async fn wait_for_ds(wmi: &WMIConnection) -> Result<(), WmiError> {
             None => return Err(WmiEventStreamSnafu.build()),
         };
 
-        let process: Win32Process = event.into_desr().context(WmiQuerySnafu)?;
+        let process: Win32ProcessTrace = event.into_desr().context(WmiQuerySnafu)?;
 
-        if process.name.to_lowercase() == "driverstation.exe" {
+        if process.process_name.to_lowercase() == "driverstation.exe" {
             break;
         }
     }

@@ -1,4 +1,4 @@
-#![feature(if_let_guard, exit_status_error)]
+#![feature(if_let_guard)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod install;
@@ -10,6 +10,8 @@ mod wmi;
 
 use snafu::prelude::*;
 use tokio_tungstenite::tungstenite;
+use tracing::Level;
+use tracing_subscriber::{filter::Targets, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Snafu)]
 pub(crate) enum AppError {
@@ -115,6 +117,15 @@ async fn kbnt() -> Result<(), AppError> {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(Targets::new().with_default(Level::DEBUG))
+        .with(
+            fmt::layer()
+                .with_ansi(false)
+                .with_writer(move || log::LogWriter),
+        )
+        .init();
+
     if let Err(e) = kbnt().await {
         let filename = log::error(e);
         notify::error(filename.display()).ok();

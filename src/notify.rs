@@ -2,6 +2,7 @@ use core::fmt;
 
 use snafu::prelude::*;
 use tauri_winrt_notification::Toast;
+use tracing::info;
 
 #[derive(Debug, Snafu)]
 #[snafu(display(
@@ -19,10 +20,7 @@ fn toast(title: impl AsRef<str>, content: impl AsRef<str>) -> Result<(), NotifyE
     let title = title.as_ref().to_string();
     let content = content.as_ref().to_string();
 
-    crate::log::message(format!(
-        "[{}] [{title}] {content}",
-        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
-    ));
+    info!("[{title}] {content}");
 
     Toast::new(crate::install::APP_ID)
         .title(&title)

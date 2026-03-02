@@ -1,4 +1,4 @@
-use std::{fs, io, path::PathBuf, process::ExitStatusError};
+use std::{fs, io, path::PathBuf};
 
 use directories::ProjectDirs;
 use serde::Deserialize;
@@ -71,13 +71,6 @@ pub(crate) enum InstallError {
     #[snafu(display("At {location}: Failed to kill old KBNT\n{source}"))]
     ExecKillOld {
         source: io::Error,
-        #[snafu(implicit)]
-        location: snafu::Location,
-    },
-
-    #[snafu(display("At {location}: Failed to kill old KBNT\n{source}"))]
-    KillOld {
-        source: ExitStatusError,
         #[snafu(implicit)]
         location: snafu::Location,
     },
@@ -162,9 +155,7 @@ fn move_exe() -> Result<(), InstallError> {
         std::process::Command::new("taskkill")
             .args(["/F", "/IM", "kbnt.exe"])
             .status()
-            .context(ExecKillOldSnafu)?
-            .exit_ok()
-            .context(KillOldSnafu)?;
+            .context(ExecKillOldSnafu)?;
     }
 
     fs::copy(&current_exe, &target_path).context(FileCreateSnafu { path: &target_path })?;
@@ -191,9 +182,6 @@ fn add_startup() -> Result<(), InstallError> {
 }
 
 fn register_appid() -> Result<(), InstallError> {
-    let install_dir = dir()?;
-    let exe_path = install_dir.join("kbnt.exe");
-
     let hkcu = winreg::RegKey::predef(HKEY_CURRENT_USER);
     let appid_key = &format!("Software\\Classes\\AppUserModelId\\{APP_ID}");
 
@@ -204,9 +192,6 @@ fn register_appid() -> Result<(), InstallError> {
     let (key, _) = hkcu.create_subkey(appid_key).context(RegistrySnafu)?;
 
     key.set_value("DisplayName", &DISPLAY_NAME)
-        .context(RegistrySnafu)?;
-
-    key.set_value("IconUri", &exe_path.to_string_lossy().to_string())
         .context(RegistrySnafu)?;
 
     Ok(())

@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use itertools::Itertools;
-use network_tables::v4::{Client, PublishProperties, PublishedTopic, Type};
+use network_tables::v4::{Client, Config, PublishProperties, PublishedTopic, Type};
 use rmpv::Utf8String;
 use snafu::{ResultExt, Snafu};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -92,7 +92,14 @@ impl NT4Connection {
             .parse::<SocketAddr>()
             .context(IpParseSnafu { ip_str: ipv4 })?;
 
-        let mut client = Client::try_new_w_config(addr, Default::default()).await;
+        let mut client = Client::try_new_w_config(
+            addr,
+            Config {
+                should_reconnect: Box::new(|_| false),
+                ..Default::default()
+            },
+        )
+        .await;
 
         while let Err(network_tables::Error::ConnectTimeout(_)) = client {
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -101,7 +108,14 @@ impl NT4Connection {
                 return Err(DsClosedSnafu.build());
             }
 
-            client = Client::try_new_w_config(addr, Default::default()).await;
+            client = Client::try_new_w_config(
+                addr,
+                Config {
+                    should_reconnect: Box::new(|_| false),
+                    ..Default::default()
+                },
+            )
+            .await;
         }
 
         let client = client.context(ConnectSnafu)?;

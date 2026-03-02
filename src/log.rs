@@ -1,20 +1,9 @@
-use std::{io::Write, path::PathBuf};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
 
 use crate::AppError;
-
-pub(crate) fn message(entry: String) {
-    let install_dir = crate::install::dir_infallible();
-    let log_path = install_dir.join("kbnt.log");
-
-    if let Err(e) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .and_then(|mut file| writeln!(file, "{}", entry))
-    {
-        eprintln!("Failed to write to log file: {}", e);
-    }
-}
 
 pub(crate) fn error(app: AppError) -> PathBuf {
     let install_dir = crate::install::dir_infallible();
@@ -35,4 +24,23 @@ pub(crate) fn error(app: AppError) -> PathBuf {
     }
 
     log_path
+}
+
+pub(crate) struct LogWriter;
+
+impl Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let install_dir = crate::install::dir_infallible();
+        let log_path = install_dir.join("kbnt.log");
+
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?
+            .write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
