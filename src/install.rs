@@ -95,6 +95,12 @@ pub(crate) enum InstallError {
         #[snafu(implicit)]
         location: snafu::Location,
     },
+
+    #[snafu(display("At {location}: Failed to elevate process"))]
+    ElevateNoSource {
+        #[snafu(implicit)]
+        location: snafu::Location,
+    },
 }
 
 pub(crate) fn dir() -> Result<PathBuf, InstallError> {
@@ -165,7 +171,7 @@ pub(crate) fn config() -> Result<KBNTConfigHandle, InstallError> {
 fn move_exe() -> Result<(), InstallError> {
     let install_dir = dir()?;
     let target_path = install_dir.join("kbnt.exe");
-    let current_exe = std::env::current_exe().context(CurrentExeSnafu)?;
+    let current_exe = env::current_exe().context(CurrentExeSnafu)?;
 
     if target_path.exists() {
         if current_exe == target_path {
@@ -180,7 +186,13 @@ fn move_exe() -> Result<(), InstallError> {
     }
 
     fs::copy(&current_exe, &target_path).context(FileCreateSnafu { path: &target_path })?;
-    Ok(())
+
+    Command::new(&target_path)
+        .args(env::args().skip(1))
+        .spawn()
+        .context(ExecKillOldSnafu)?;
+
+    process::exit(0);
 }
 
 fn add_startup() -> Result<(), InstallError> {
@@ -246,22 +258,25 @@ pub(crate) fn elevate() -> Result<(), InstallError> {
 
     let current_exe = env::current_exe().context(CurrentExeSnafu)?;
 
-    unsafe {
+    let exe_wide: Vec<u16> = current_exe
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+
+    let res = unsafe {
         ShellExecuteW(
             None,
             w!("runas"),
-            PCWSTR(
-                current_exe
-                    .as_os_str()
-                    .encode_wide()
-                    .chain(Some(0))
-                    .collect::<Vec<u16>>()
-                    .as_ptr(),
-            ),
+            PCWSTR(exe_wide.as_ptr()),
             PCWSTR::null(),
             PCWSTR::null(),
             SW_SHOW,
-        );
+        )
+    };
+
+    if res.0 as isize <= 32 {
+        return Err(ElevateNoSourceSnafu.build());
     }
 
     process::exit(0);
