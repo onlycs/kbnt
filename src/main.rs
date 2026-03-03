@@ -8,6 +8,8 @@ mod notify;
 mod nt;
 mod wmi;
 
+use std::io;
+
 use snafu::prelude::*;
 use tokio_tungstenite::tungstenite;
 use tracing::{Level, info};
@@ -96,11 +98,28 @@ async fn kbnt() -> Result<(), AppError> {
                 return Err(KeyboardHookStoppedSnafu.build());
             }
             Err(e) => {
-                let Some(network_tables::Error::Tungstenite(tungstenite::Error::ConnectionClosed)) =
-                    e.nt_source()
-                else {
+                let Some(nt) = e.nt_source() else {
                     return Err(e).context(NetworkTablesSnafu);
                 };
+
+                let ok = match nt {
+                    network_tables::Error::Io(io) => [
+                        io::ErrorKind::ConnectionReset,
+                        io::ErrorKind::ConnectionAborted,
+                        io::ErrorKind::ConnectionRefused,
+                        io::ErrorKind::NotConnected,
+                    ]
+                    .contains(&io.kind()),
+                    network_tables::Error::ConnectTimeout(_) => true,
+                    network_tables::Error::Tungstenite(tungstenite::Error::ConnectionClosed) => {
+                        true
+                    }
+                    _ => false,
+                };
+
+                if !ok {
+                    return Err(e).context(NetworkTablesSnafu);
+                }
 
                 if wmi::query_ds(&wmi).await.context(WmiSnafu)? {
                     // attempt reconnection immediately if DS is still open
